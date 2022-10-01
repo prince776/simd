@@ -114,6 +114,36 @@ int sum_simd_faster(int *a, int n)
     return res;
 }
 
+// For 256, idh that because m1 sucks
+// int hsum(__m256i x) {
+//     __m128i l = _mm256_extracti128_si256(x, 0);
+//     __m128i h = _mm256_extracti128_si256(x, 1);
+//     l = _mm_add_epi32(l, h);
+//     l = _mm_hadd_epi32(l, l);
+//     return _mm_extract_epi32(l, 0) + _mm_extract_epi32(l, 1);
+// }
+
+int hsum(__m128 x)
+{
+    x = _mm_hadd_epi32(x, x);
+    return _mm_extract_epi32(x, 0) + _mm_extract_epi32(x, 1);
+}
+
+// Sum using horizontal sum
+int sum_simd_hsum(int *a, int n)
+{
+    v4si *as = (v4si *)a;
+    v4si s = {0};
+    for (int i = 0; i < n / 4; i++)
+        s += as[i];
+
+    int res = hsum(s);
+    // add the remainder of a
+    for (int i = (n / 8) * 8; i < n; i++)
+        res += a[i];
+    return res;
+}
+
 void sum_simd_test()
 {
     int a[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
@@ -128,6 +158,9 @@ void sum_simd_test()
     got = sum_simd_faster(a, n);
     assert(expected == got);
     cout << "Got correct sum(faster): " << got << endl;
+    got = sum_simd_hsum(a, n);
+    assert(expected == got);
+    cout << "Got correct sum(hsum): " << got << endl;
 }
 
 int main()
