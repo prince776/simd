@@ -46,8 +46,65 @@ void basic()
     cout << endl;
 }
 
+typedef int v4si __attribute__((vector_size(16)));
+
+auto print = [](v4si x)
+{
+    for (int i = 0; i < 4; i++)
+        cout << x[i] << ", ";
+    cout << endl;
+};
+
+void gcc_vector_extension()
+{
+    v4si a = {1, 2, 3, 4};
+    v4si b = {1, 2, 3, 4};
+    v4si c = a + b;
+
+    print(c);
+    c *= 2;
+    print(c);
+
+    v4si x = {}; // all zeros
+    print(x);
+    v4si y = 42 + v4si{}; // broadcast
+    print(y);
+}
+
+int sum_simd(int *a, int n)
+{
+    v4si *as = (v4si *)a;
+    v4si s = {0};
+    for (int i = 0; i < n / 4; i++)
+        s += as[i];
+
+    int res = 0;
+    // sum the 4 accumulators into one
+    for (int i = 0; i < 4; i++)
+        res += s[i];
+    // add the remainder of a
+    for (int i = (n / 8) * 8; i < n; i++)
+        res += a[i];
+    return res;
+}
+
+void sum_simd_test()
+{
+    int a[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int n = sizeof(a) / sizeof(int);
+
+    int expected = 0;
+    for (int i = 0; i < n; i++)
+        expected += a[i];
+    int got = sum_simd(a, n);
+    assert(expected == got);
+    cout << "Got correct sum: " << got << endl;
+}
+
 int main()
 {
     // cpuSupport();
-    basic();
+    // basic();
+    // gcc_vector_extension();
+    sum_simd_test();
 }
