@@ -2,6 +2,7 @@
 #pragma GCC optimize("O3")
 
 #include <iostream>
+#include <random>
 #ifdef __x86_64__
 #include <immintrin.h>
 #else
@@ -49,13 +50,20 @@ void basic()
 constexpr int T = 4;
 typedef int v4si __attribute__((vector_size(T * sizeof(int))));
 
-auto print = [](v4si x)
+void print(v4si x)
 {
     for (int i = 0; i < 4; i++)
         cout << x[i] << ", ";
     cout << endl;
-};
+}
 
+void print(__m128i x)
+{
+    auto t = (int *)&x;
+    for (int i = 0; i < T; i++)
+        std::cout << t[i] << " ";
+    std::cout << std::endl;
+}
 void gcc_vector_extension()
 {
     v4si a = {1, 2, 3, 4};
@@ -168,10 +176,89 @@ void sum_simd_test()
     cout << "Got correct sum(hsum): " << got << endl;
 }
 
+// sum all values less than k
+int predicated_sum(int *a, int n, int k)
+{
+    v4si *as = (v4si *)a;
+    v4si sum = {0};
+
+    for (int i = 0; i < n / T; i++)
+        sum += as[i] < k ? as[i] : 0;
+
+    int res = hsum(sum);
+    for (int i = n / T * T; i < n; i++)
+        res += a[i] < k ? a[i] : 0;
+
+    return res;
+}
+
+int predicated_sum_intrinsics_blend(int *a, int n, int k)
+{
+    const __m128i condn = _mm_set1_epi32(k - 1);
+    const __m128i zero = _mm_setzero_si128();
+    __m128i sum = zero;
+
+    for (int i = 0; i + T - 1 < n; i += T)
+    {
+        __m128i curr = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i mask = _mm_cmpgt_epi32(curr, condn);
+        curr = _mm_blendv_epi8(curr, zero, mask);
+        sum = _mm_add_epi32(sum, curr);
+    }
+
+    int res = hsum(sum);
+    for (int i = n / T * T; i < n; i++)
+        res += a[i] < k ? a[i] : 0;
+    return res;
+}
+
+int predicated_sum_intrinsics_and(int *a, int n, int k)
+{
+    const __m128i condn = _mm_set1_epi32(k);
+    const __m128i zero = _mm_setzero_si128();
+    __m128i sum = zero;
+
+    for (int i = 0; i + T - 1 < n; i += T)
+    {
+        __m128i curr = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i mask = _mm_cmpgt_epi32(condn, curr);
+        curr = _mm_and_si128(curr, mask);
+        sum = _mm_add_epi32(sum, curr);
+    }
+
+    int res = hsum(sum);
+    for (int i = n / T * T; i < n; i++)
+        res += a[i] < k ? a[i] : 0;
+    return res;
+}
+
+void predicated_sum_test()
+{
+    int k = 5;
+    int a[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int n = sizeof(a) / sizeof(int);
+    shuffle(a, a + n, default_random_engine(0));
+
+    int expected = 0;
+    for (int i = 0; i < n; i++)
+        expected += a[i] < k ? a[i] : 0;
+
+    int got = predicated_sum(a, n, k);
+    assert(expected == got);
+    cout << "Got correct sum: " << got << endl;
+    got = predicated_sum_intrinsics_blend(a, n, k);
+    assert(expected == got);
+    cout << "Got correct sum(intrinsic blend): " << got << endl;
+    got = predicated_sum_intrinsics_and(a, n, k);
+    assert(expected == got);
+    cout << "Got correct sum(intrinsic and): " << got << endl;
+}
+
 int main()
 {
     // cpuSupport();
     // basic();
     // gcc_vector_extension();
-    sum_simd_test();
+    // sum_simd_test();
+    predicated_sum_test();
 }
