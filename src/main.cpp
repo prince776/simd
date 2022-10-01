@@ -89,9 +89,9 @@ int sum_simd(int *a, int n)
     return res;
 }
 
-// for the accumulation of vectors, we can still improve prev impl
-// because throughput of add is 2, so by dividing the array into 2 more
-// parts we can saturate it
+// in prev impl we are still waiting 1 cycle b/w the loop iterations
+// for vector addition (data hazard). but its throughput is 2, so we can
+// optimize by having these two interleave, and since they are independent we get faster sum
 int sum_simd_faster(int *a, int n)
 {
     constexpr int B = 2;
@@ -132,14 +132,19 @@ int hsum(__m128 x)
 // Sum using horizontal sum
 int sum_simd_hsum(int *a, int n)
 {
+    constexpr int B = 2;
     v4si *as = (v4si *)a;
-    v4si s = {0};
-    for (int i = 0; i < n / 4; i++)
-        s += as[i];
+    v4si s[B] = {0};
+    for (int i = 0; i + (B - 1) < n / T; i += B)
+        for (int j = 0; j < B; j++)
+            s[j] += as[i + j];
 
-    int res = hsum(s);
-    // add the remainder of a
-    for (int i = (n / 8) * 8; i < n; i++)
+    // sum all accumualators into one
+    for (int i = 1; i < B; i++)
+        s[0] += s[i];
+
+    int res = hsum(s[0]);
+    for (int i = n / T * T; i < n; i++)
         res += a[i];
     return res;
 }
