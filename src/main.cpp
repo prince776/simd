@@ -46,7 +46,8 @@ void basic()
     cout << endl;
 }
 
-typedef int v4si __attribute__((vector_size(16)));
+constexpr int T = 4;
+typedef int v4si __attribute__((vector_size(T * sizeof(int))));
 
 auto print = [](v4si x)
 {
@@ -88,6 +89,31 @@ int sum_simd(int *a, int n)
     return res;
 }
 
+// for the accumulation of vectors, we can still improve prev impl
+// because throughput of add is 2, so by dividing the array into 2 more
+// parts we can saturate it
+int sum_simd_faster(int *a, int n)
+{
+    constexpr int B = 2;
+    v4si *as = (v4si *)a;
+    v4si s[B] = {0};
+    for (int i = 0; i + (B - 1) < n / T; i += B)
+        for (int j = 0; j < B; j++)
+            s[j] += as[i + j];
+
+    // sum all accumualators into one
+    for (int i = 1; i < B; i++)
+        s[0] += s[i];
+
+    int res = 0;
+    for (int i = 0; i < T; i++)
+        res += s[0][i];
+
+    for (int i = n / T * T; i < n; i++)
+        res += a[i];
+    return res;
+}
+
 void sum_simd_test()
 {
     int a[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
@@ -99,6 +125,9 @@ void sum_simd_test()
     int got = sum_simd(a, n);
     assert(expected == got);
     cout << "Got correct sum: " << got << endl;
+    got = sum_simd_faster(a, n);
+    assert(expected == got);
+    cout << "Got correct sum(faster): " << got << endl;
 }
 
 int main()
