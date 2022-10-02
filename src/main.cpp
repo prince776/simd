@@ -417,6 +417,51 @@ void count_test()
     cout << "Found correct count: " << got << endl;
 }
 
+// c[i] = a[i] * b[i]
+void mul_simd_32_to_64_bit(int *a, int *b, long long *c, int n)
+{
+    for (int i = 0; i + T - 1 < n; i += T)
+    {
+        __m128i x = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i y = _mm_loadu_si128((__m128i *)&b[i]);
+
+        // do _mm_mullo_epi32 if result is 32 bit, but result can be 64 bit here
+        // 0b|00|01|00|00 first element stores a[0] and third stores a[1]
+        // 0b|00|11|00|10 first element stores a[2] and third stores a[3]
+        __m128i x1 = _mm_shuffle_epi32(x, 0b00010000);
+        __m128i x2 = _mm_shuffle_epi32(x, 0b00110010);
+        __m128i y1 = _mm_shuffle_epi32(x, 0b00010000);
+        __m128i y2 = _mm_shuffle_epi32(x, 0b00110010);
+
+        x = _mm_mul_epi32(x1, y1);
+        y = _mm_mul_epi32(x2, y2);
+
+        _mm_storeu_si128((__m128i *)&c[i], x);
+        _mm_storeu_si128((__m128i *)&c[i + T / 2], y);
+    }
+
+    for (int i = n / T * T; i < n; i++)
+        c[i] = (long long)a[i] * b[i];
+}
+
+void mul_simd_test()
+{
+    int a[] = {1, 2, 7, 4, 5, 7, 7, 8, 9};
+    int b[] = {1, 2, 7, 4, 5, 7, 7, 8, 9};
+    constexpr int n = sizeof(a) / sizeof(int);
+    long long expected[n] = {0};
+    for (int i = 0; i < n; i++)
+        expected[i] = (long long)a[i] * b[i];
+
+    long long got[n];
+    mul_simd_32_to_64_bit(a, b, got, n);
+
+    for (int i = 0; i < n; i++)
+        assert(expected[i] == got[i]);
+
+    cout << "Found correct mulitplied array" << endl;
+}
+
 int main()
 {
     // cpuSupport();
@@ -425,5 +470,6 @@ int main()
     // sum_simd_test();
     // predicated_sum_test();
     // find_test();
-    count_test();
+    // count_test();
+    mul_simd_test();
 }
