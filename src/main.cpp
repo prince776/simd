@@ -131,7 +131,7 @@ int sum_simd_faster(int *a, int n)
 //     return _mm_extract_epi32(l, 0) + _mm_extract_epi32(l, 1);
 // }
 
-int hsum(__m128 x)
+int hsum(__m128i x)
 {
     x = _mm_hadd_epi32(x, x);
     return _mm_extract_epi32(x, 0) + _mm_extract_epi32(x, 1);
@@ -245,13 +245,107 @@ void predicated_sum_test()
 
     int got = predicated_sum(a, n, k);
     assert(expected == got);
-    cout << "Got correct sum: " << got << endl;
+    cout << "Got correct predicated sum: " << got << endl;
     got = predicated_sum_intrinsics_blend(a, n, k);
     assert(expected == got);
-    cout << "Got correct sum(intrinsic blend): " << got << endl;
+    cout << "Got correct predicated sum(intrinsic blend): " << got << endl;
     got = predicated_sum_intrinsics_and(a, n, k);
     assert(expected == got);
-    cout << "Got correct sum(intrinsic and): " << got << endl;
+    cout << "Got correct predicated sum(intrinsic and): " << got << endl;
+}
+
+int find_simd(int *a, int n, int k)
+{
+    __m128i needle = _mm_set1_epi32(k);
+    for (int i = 0; i + T - 1 < n; i += T)
+    {
+        __m128i curr = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i cmp = _mm_cmpeq_epi32(curr, needle);
+        int mask = _mm_movemask_ps(cmp);
+        if (mask != 0)
+        {
+            return i + __builtin_ctz(mask);
+        }
+    }
+    for (int i = i / T * T; i < n; i++)
+        if (a[i] == k)
+            return i;
+    return -1;
+}
+
+// we can use test to make it slightly faster
+int find_simd_using_test(int *a, int n, int k)
+{
+    __m128i needle = _mm_set1_epi32(k);
+    for (int i = 0; i + T - 1 < n; i += T)
+    {
+        __m128i curr = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i cmp = _mm_cmpeq_epi32(curr, needle);
+        if (!_mm_testz_si128(cmp, cmp))
+        {
+            int mask = _mm_movemask_ps(cmp);
+            return i + __builtin_ctz(mask);
+        }
+    }
+    for (int i = n / T * T; i < n; i++)
+        if (a[i] == k)
+            return i;
+    return -1;
+}
+
+// test and movemask have throughput 1, so they bottleneck
+// so what we can do is do two (load and cmpeq) manually to saturate better
+int find_simd_2x(int *a, int n, int k)
+{
+    __m128i needle = _mm_set1_epi32(k);
+    for (int i = 0; i + 2 * T - 1 < n; i += 2 * T)
+    {
+        __m128i curr1 = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i curr2 = _mm_loadu_si128((__m128i *)&a[i + T]);
+        __m128i cmp1 = _mm_cmpeq_epi32(curr1, needle);
+        __m128i cmp2 = _mm_cmpeq_epi32(curr2, needle);
+        __m128i cmpAgg = _mm_or_si128(cmp1, cmp2);
+        if (!_mm_testz_si128(cmpAgg, cmpAgg))
+        {
+            int mask = (_mm_movemask_ps(cmp2) << T) + _mm_movemask_ps(cmp1);
+            return i + __builtin_ctz(mask);
+        }
+    }
+    for (int i = (n / (2 * T)) * (2 * T); i < n; i++)
+        if (a[i] == k)
+            return i;
+    return -1;
+}
+
+// we can try doing 4 at a time, to saturate if decode width is 4 (since #instructions
+// in prev is 5, so we are using 4/5
+// int simd_find_4x(...) {...}
+
+void find_test()
+{
+    int a[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int n = sizeof(a) / sizeof(int);
+
+    for (int _ = 0; _ < 1000; _++)
+    {
+        shuffle(a, a + n, default_random_engine(0));
+        int k = rand() % 10;
+
+        int expected = -1;
+        for (int i = 0; i < n; i++)
+            if (a[i] == k)
+                expected = i;
+
+        int got = find_simd(a, n, k);
+        assert(expected == got);
+        got = find_simd_using_test(a, n, k);
+        assert(expected == got);
+        got = find_simd_2x(a, n, k);
+        if (expected != got)
+            cout << k << ", " << expected << ": " << got << endl;
+        assert(expected == got);
+    }
+    cout << "Found correct idx" << endl;
 }
 
 int main()
@@ -260,5 +354,6 @@ int main()
     // basic();
     // gcc_vector_extension();
     // sum_simd_test();
-    predicated_sum_test();
+    // predicated_sum_test();
+    find_test();
 }
