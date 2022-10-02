@@ -462,6 +462,69 @@ void mul_simd_test()
     cout << "Found correct mulitplied array" << endl;
 }
 
+int hmax(__m128i x)
+{
+    x = _mm_max_epi32(x, _mm_slli_si128(x, 4));
+    x = _mm_max_epi32(x, _mm_slli_si128(x, 8));
+    return _mm_extract_epi32(x, 3);
+}
+
+int prefix_sum_max(int *a, int n)
+{
+    // prefix sum till last element of current block
+    __m128i sum = _mm_setzero_si128();
+    __m128i mx = _mm_setzero_si128();
+
+    for (int i = 0; i + T - 1 < n; i += T)
+    {
+        // tmp_sum is the prefix sum of current block
+        __m128i tmp_sum = _mm_loadu_si128((__m128i *)&a[i]);
+        tmp_sum = _mm_add_epi32(tmp_sum, _mm_slli_si128(tmp_sum, 4));
+        tmp_sum = _mm_add_epi32(tmp_sum, _mm_slli_si128(tmp_sum, 8));
+        sum = _mm_add_epi32(sum, tmp_sum);
+        mx = _mm_max_epi32(sum, mx);
+
+        sum = _mm_shuffle_epi32(sum, 0b11111111);
+    }
+
+    int res = hmax(mx);
+    int prevSum = _mm_extract_epi32(sum, 3);
+    for (int i = n / T * T; i < n; i++)
+    {
+        prevSum += a[i];
+        res = max(res, prevSum);
+    }
+    return res;
+}
+
+void prefix_sum_max_test()
+{
+    int a[] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    int n = sizeof(a) / sizeof(int);
+
+    for (int _ = 0; _ < 2; _++)
+    {
+        for (int i = 0; i < n; i++)
+        {
+            if (rand() % 2)
+                a[i] *= -1;
+        }
+        shuffle(a, a + n, default_random_engine(0));
+
+        int expected = INT_MIN;
+        int psum = 0;
+        for (int i = 0; i < n; i++)
+        {
+            psum += a[i];
+            expected = max(expected, psum);
+        }
+
+        int got = prefix_sum_max(a, n);
+        assert(expected == got);
+    }
+    cout << "Found correct prefix sum max" << endl;
+}
+
 int main()
 {
     // cpuSupport();
@@ -471,5 +534,6 @@ int main()
     // predicated_sum_test();
     // find_test();
     // count_test();
-    mul_simd_test();
+    // mul_simd_test();
+    prefix_sum_max_test();
 }
