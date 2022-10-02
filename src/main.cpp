@@ -348,6 +348,75 @@ void find_test()
     cout << "Found correct idx" << endl;
 }
 
+int count_simd(int *a, int n, int k)
+{
+    __m128i needle = _mm_set1_epi32(k);
+    __m128i ones = _mm_set1_epi32(1);
+    __m128i sum = _mm_setzero_si128();
+
+    for (int i = 0; i + T - 1 < n; i += T)
+    {
+        __m128i curr = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i cmp = _mm_cmpeq_epi32(curr, needle);
+        cmp = _mm_and_si128(cmp, ones);
+        sum = _mm_add_epi32(sum, cmp);
+    }
+
+    int res = hsum(sum);
+    for (int i = n / T * T; i < n; i++)
+        res += a[i] == k;
+    return res;
+}
+
+// prev impl is what auto vectorization will get
+// we can speed it up by saturating more
+// hence by doing in chunks of 2 independent loads
+// as they are pipelined without data hazard
+// i.e instruction level parallelism
+// we can also just use the flag we get from cmpeq by negating it in end (as it is -1)
+int count_simd_2x(int *a, int n, int k)
+{
+    __m128i needle = _mm_set1_epi32(k);
+    __m128i sum1 = _mm_setzero_si128();
+    __m128i sum2 = _mm_setzero_si128();
+
+    for (int i = 0; i + 2 * T - 1 < n; i += 2 * T)
+    {
+        __m128i curr1 = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i curr2 = _mm_loadu_si128((__m128i *)&a[i + T]);
+        __m128i cmp1 = _mm_cmpeq_epi32(curr1, needle);
+        __m128i cmp2 = _mm_cmpeq_epi32(curr2, needle);
+        sum1 = _mm_add_epi32(sum1, cmp1);
+        sum2 = _mm_add_epi32(sum2, cmp2);
+    }
+
+    sum1 = _mm_add_epi32(sum1, sum2);
+
+    int res = -hsum(sum1);
+    for (int i = n / T * T; i < n; i++)
+        res += a[i] == k;
+    return res;
+}
+
+void count_test()
+{
+    int a[] = {1, 2, 7, 4, 5, 7, 7, 8, 9};
+    int n = sizeof(a) / sizeof(int);
+    int k = 7;
+    shuffle(a, a + n, default_random_engine(0));
+
+    int expected = 0;
+    for (int i = 0; i < n; i++)
+        if (a[i] == k)
+            expected++;
+
+    int got = count_simd(a, n, k);
+    assert(expected == got);
+    got = count_simd_2x(a, n, k);
+    assert(expected == got);
+    cout << "Found correct count: " << got << endl;
+}
+
 int main()
 {
     // cpuSupport();
@@ -355,5 +424,6 @@ int main()
     // gcc_vector_extension();
     // sum_simd_test();
     // predicated_sum_test();
-    find_test();
+    // find_test();
+    count_test();
 }
