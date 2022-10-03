@@ -525,6 +525,125 @@ void prefix_sum_max_test()
     cout << "Found correct prefix sum max" << endl;
 }
 
+// From now assume multiple of T size array for simplicity
+// and that's also what ideally I should do, I should pad the array so that simd works nicely
+// In this there's some inter-dependency b/w loops hence we can optimize some more by
+// instruction level parallelism
+int argmin_simple(int *a, int n)
+{
+    __m128i min = _mm_set1_epi32(INT_MAX);
+    __m128i idx = _mm_setzero_si128();
+
+    const __m128i four = _mm_set1_epi32(4);
+    __m128i curr = _mm_setr_epi32(0, 1, 2, 3);
+    for (int i = 0; i < n; i += T)
+    {
+        __m128i x = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i mask = _mm_cmpgt_epi32(min, x);
+        idx = _mm_blendv_epi8(idx, curr, mask);
+        min = _mm_min_epi32(min, x); // can use blend as well, but min is very fast
+        curr = _mm_add_epi32(curr, four);
+    }
+
+    int min_arr[T], idx_arr[T];
+    _mm_storeu_si128((__m128i *)min_arr, min);
+    _mm_storeu_si128((__m128i *)idx_arr, idx);
+
+    int ans = idx_arr[0], m = min_arr[0];
+    for (int i = 1; i < T; i++)
+        if (min_arr[i] < m)
+            ans = idx_arr[i];
+    return ans;
+}
+
+// In a random array, chances of the update are low, O(logn)
+int argmin_scalar(int *a, int n)
+{
+    int k = 0;
+    for (int i = 0; i < n; i++)
+        if (a[i] < a[k]) [[unlikely]]
+            k = i;
+
+    return k;
+}
+
+// Using this we can write a simd version
+int argmin_with_unlikely(int *a, int n)
+{
+    int min = INT_MAX, idx = 0;
+
+    __m128i p = _mm_set1_epi32(min);
+
+    for (int i = 0; i < n; i += T)
+    {
+        __m128i y = _mm_loadu_si128((__m128i *)&a[i]);
+        __m128i mask = _mm_cmpgt_epi32(p, y);
+        if (!_mm_testz_si128(mask, mask)) // if any element is updated
+        {
+            [[unlikely]] for (int j = i; j < i + T; j++) if (a[j] < min)
+                min = a[idx = j];
+            p = _mm_set1_epi32(min);
+        }
+    }
+
+    return idx;
+}
+// ^^ This can be further improved by instruction level parallelism
+// and Optimize the local argmin: instead of calculating its exact location,
+// we can just save the index of the block and then come back at the end and find it just once.
+// This lets us only compute the minimum on each positive check and broadcast it to a vector,
+// which is simpler and much faster.
+// but this tanks for decreasing array, since the unlikely is no more unlikely
+
+// int argmin(int *a, int n) {
+//     int needle = min(a, n);
+//     int idx = find(a, n, needle);
+//     return idx;
+// }
+
+// we can speed it up by keeping the block number where minimum exists (B = 256 (say))
+// and then find in the final block
+// const int B = 256;
+
+// // returns the minimum and its first block
+// pair<int, int> approx_argmin(int *a, int n) {
+//     int res = INT_MAX, idx = 0;
+//     for (int i = 0; i < n; i += B) {
+//         int val = min(a + i, B);
+//         if (val < res) {
+//             res = val;
+//             idx = i;
+//         }
+//     }
+//     return {res, idx};
+// }
+
+// int argmin(int *a, int n) {
+//     auto [needle, base] = approx_argmin(a, n);
+//     int idx = find(a + base, B, needle);
+//     return base + idx;
+// }
+
+void argmin_test()
+{
+    int a[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    int n = sizeof(a) / sizeof(int);
+    assert(n % T == 0);
+    shuffle(a, a + n, default_random_engine(0));
+
+    for (int _ = 0; _ < 100; _++)
+    {
+        int expected = find(a, a + n, 1) - a;
+        int got = argmin_simple(a, n);
+        assert(expected == got);
+        got = argmin_scalar(a, n);
+        assert(expected == got);
+        got = argmin_with_unlikely(a, n);
+        assert(expected == got);
+    }
+    cout << "Found correct minimum element index" << endl;
+}
+
 int main()
 {
     // cpuSupport();
@@ -535,5 +654,6 @@ int main()
     // find_test();
     // count_test();
     // mul_simd_test();
-    prefix_sum_max_test();
+    // prefix_sum_max_test();
+    argmin_test();
 }
